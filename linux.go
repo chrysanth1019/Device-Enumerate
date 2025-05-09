@@ -5,14 +5,13 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 func readFirstLine(path string) string {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -29,7 +28,7 @@ func printDevice(deviceType, id, name, status string) {
 
 func listNetworkInterfaces() {
 	basePath := "/sys/class/net"
-	files, err := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
 	if err != nil {
 		fmt.Println("Error reading network interfaces:", err)
 		return
@@ -37,8 +36,7 @@ func listNetworkInterfaces() {
 
 	for _, f := range files {
 		id := f.Name()
-		operstatePath := filepath.Join(basePath, id, "operstate")
-		status := readFirstLine(operstatePath)
+		status := readFirstLine(filepath.Join(basePath, id, "operstate"))
 		if status == "" {
 			status = "unknown"
 		}
@@ -48,7 +46,10 @@ func listNetworkInterfaces() {
 
 func listUSBDevices() {
 	basePath := "/sys/bus/usb/devices"
-	files, _ := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
+	if err != nil {
+		return
+	}
 
 	for _, f := range files {
 		id := f.Name()
@@ -71,7 +72,10 @@ func listUSBDevices() {
 
 func listPCIDevices() {
 	basePath := "/sys/bus/pci/devices"
-	files, _ := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
+	if err != nil {
+		return
+	}
 
 	for _, f := range files {
 		id := f.Name()
@@ -85,7 +89,10 @@ func listPCIDevices() {
 
 func listStorageDevices() {
 	basePath := "/sys/block"
-	files, _ := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
+	if err != nil {
+		return
+	}
 
 	for _, f := range files {
 		id := f.Name()
@@ -99,7 +106,7 @@ func listStorageDevices() {
 
 func listWebcams() {
 	basePath := "/sys/class/video4linux"
-	files, err := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
 	if err != nil {
 		return
 	}
@@ -113,7 +120,7 @@ func listWebcams() {
 
 func listInputDevices() {
 	basePath := "/sys/class/input"
-	files, err := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
 	if err != nil {
 		return
 	}
@@ -127,7 +134,7 @@ func listInputDevices() {
 
 func listTTYDevices() {
 	basePath := "/sys/class/tty"
-	files, err := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
 	if err != nil {
 		return
 	}
@@ -141,7 +148,7 @@ func listTTYDevices() {
 
 func listSoundDevices() {
 	basePath := "/sys/class/sound"
-	files, err := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
 	if err != nil {
 		return
 	}
@@ -155,7 +162,7 @@ func listSoundDevices() {
 
 func listBluetoothDevices() {
 	basePath := "/sys/class/bluetooth"
-	files, err := ioutil.ReadDir(basePath)
+	files, err := os.ReadDir(basePath)
 	if err != nil {
 		return
 	}
@@ -168,8 +175,7 @@ func listBluetoothDevices() {
 		if deviceName == "" {
 			deviceName = "Unknown Bluetooth Device"
 		}
-		status := "available"
-		printDevice("bluetooth", deviceAddr, deviceName, status)
+		printDevice("bluetooth", deviceAddr, deviceName, "available")
 	}
 }
 
@@ -190,9 +196,9 @@ func enumerateForLinux() {
 		fmt.Println("This program must run on a Linux system with /sys available.")
 		return
 	}
-
 	listAllDevices()
 }
+
 
 func enumerateForMAC() {
 }
