@@ -1,4 +1,4 @@
-# Hardware Enumerator (macOS & Windows)
+# Hardware Enumerator (macOS, Windows, Linux)
 
 This Go project is a cross-platform hardware enumerator that retrieves detailed system hardware information, such as USB devices, storage, network interfaces, Bluetooth, Wi-Fi, cameras, PCI devices, and CPU details.
 
@@ -13,6 +13,7 @@ This Go project is a cross-platform hardware enumerator that retrieves detailed 
 
 - macOS
 - Windows
+- Linux
 
 ## Requirements
 
@@ -28,3 +29,7 @@ This Go project is a cross-platform hardware enumerator that retrieves detailed 
 - Required Go package:
   ```bash
   go get github.com/StackExchange/wmi
+
+### Linux
+
+- Go 1.18+
