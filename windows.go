@@ -67,3 +67,6 @@ func enumerateForWindows() {
 
 func enumerateForMAC() {
 }
+
+func enumerateForLinux() {
+}

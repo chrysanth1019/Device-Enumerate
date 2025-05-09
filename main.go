@@ -6,12 +6,13 @@ import (
 )
 
 func main() {
-	// Check the current operating system
 	switch runtime.GOOS {
 	case "darwin":
 		enumerateForMAC()
 	case "windows":
 		enumerateForWindows()
+	case "linux":
+		enumerateForLinux()
 	default:
 		fmt.Println("Unsupported OS")
 	}

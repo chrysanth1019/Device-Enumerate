@@ -267,6 +267,9 @@ func printKeyValue(key string, value interface{}) {
 	}
 }
 
-func enumerateForWindows() {
-	
+func enumerateForWindows() {	
+}
+
+
+func enumerateForLinux() {
 }
