@@ -43,22 +43,31 @@ func listNetworkInterfaces() {
 		printDevice("network", id, id, status)
 	}
 }
-
 func listUSBDevices() {
 	basePath := "/sys/bus/usb/devices"
 	files, err := os.ReadDir(basePath)
 	if err != nil {
+		fmt.Println("Error reading USB devices:", err)
 		return
 	}
 
 	for _, f := range files {
 		id := f.Name()
 		path := filepath.Join(basePath, id)
-		product := readFirstLine(filepath.Join(path, "product"))
-		if product == "" {
+
+		// Ensure it's a real USB device by checking if idVendor/idProduct exist
+		vid := readFirstLine(filepath.Join(path, "idVendor"))
+		pid := readFirstLine(filepath.Join(path, "idProduct"))
+
+		if vid == "" || pid == "" {
 			continue
 		}
-		vendor := readFirstLine(filepath.Join(path, "idVendor"))
+
+		product := readFirstLine(filepath.Join(path, "product"))
+		if product == "" {
+			product = "Unknown USB Device"
+		}
+
 		auth := readFirstLine(filepath.Join(path, "authorized"))
 		status := "unknown"
 		if auth == "1" {
@@ -66,7 +75,9 @@ func listUSBDevices() {
 		} else if auth == "0" {
 			status = "not connected"
 		}
-		printDevice("usb", id, product+" (Vendor: "+vendor+")", status)
+
+		name := fmt.Sprintf("%s (VID: %s, PID: %s)", product, vid, pid)
+		printDevice("usb", id, name, status)
 	}
 }
 

@@ -13,6 +13,6 @@ require (
 	github.com/tinygo-org/cbgo v0.0.4 // indirect
 	github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899 // indirect
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691 // indirect
-	golang.org/x/sys v0.11.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
 	tinygo.org/x/bluetooth v0.11.0 // indirect
 )
