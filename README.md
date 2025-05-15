@@ -33,3 +33,11 @@ This Go project is a cross-platform hardware enumerator that retrieves detailed 
 ### Linux
 
 - Go 1.18+
+
+
+## Release
+```bash
+git add .
+git commit -m "v1.0.0"
+git tag v1.0.0
+git push origin v1.0.0
