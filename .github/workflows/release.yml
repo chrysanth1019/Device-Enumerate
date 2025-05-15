@@ -12,12 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create release directory and archive
+      - name: Archive entire source
         run: |
-          mkdir release-src
-          cp -r src README.md go.mod go.sum release-src/
-          zip -r source.zip release-src
-          tar -czf source.tar.gz release-src
+          git archive --format=zip -o source.zip HEAD
+          git archive --format=tar.gz -o source.tar.gz HEAD
 
       - name: Upload release to GitHub
         if: startsWith(github.ref, 'refs/tags/')
