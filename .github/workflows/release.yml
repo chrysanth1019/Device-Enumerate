@@ -7,11 +7,25 @@ on:
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Build on ${{ matrix.goos }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - goos: linux
+            goarch: amd64
+            output_name: enumerator-linux
+            runner: ubuntu-latest
+
+          - goos: windows
+            goarch: amd64
+            output_name: enumerator-windows.exe
+            runner: windows-latest
+
+          - goos: darwin
+            goarch: amd64
+            output_name: enumerator-darwin
+            runner: macos-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -22,21 +36,15 @@ jobs:
           go-version: '1.24.3'
 
       - name: Build binary
+        shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            GOOS=windows GOARCH=amd64 go build -o enumerator-windows.exe
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            GOOS=darwin GOARCH=amd64 go build -o enumerator-darwin
-          else
-            GOOS=linux GOARCH=amd64 go build -o enumerator-linux
-          fi
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o ${{ matrix.output_name }}
 
-      - name: Upload binary artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ runner.os }}-binary
-          path: |
-            enumerator-*
+          name: ${{ matrix.output_name }}
+          path: ${{ matrix.output_name }}
 
   release:
     name: Create GitHub Release
@@ -44,12 +52,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: List downloaded files
+      - name: List files
         run: ls -R artifacts
 
       - name: Zip all binaries
