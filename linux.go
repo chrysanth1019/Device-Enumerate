@@ -4,11 +4,23 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+type DeviceInfo struct {
+	Name         string `json:"Name"`
+	ID           string `json:"DeviceID"`
+	SerialNumber string `json:"Serial"`
+	Status       string `json:"Status"`
+	DeviceType   string `json:"DeviceType"`
+	VendorID     string `json:"VID"`
+	ProductID    string `json:"PID"`
+	Enumerator   string `json:"EnumID"`
+}
 
 func readFirstLine(path string) string {
 	data, err := os.ReadFile(path)
@@ -18,31 +30,15 @@ func readFirstLine(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
-func printDevice(deviceType, id, name, status string) {
-	fmt.Printf("Name       : %s\n", name)
-	fmt.Printf("DeviceID   : %s\n", id)
-	fmt.Printf("Status     : %s\n", status)
-	fmt.Printf("DeviceType : %s\n", deviceType)
-	fmt.Println("-----------------------------------")
-}
-
-func listNetworkInterfaces() {
-	basePath := "/sys/class/net"
-	files, err := os.ReadDir(basePath)
+func printDeviceAsJSON(device DeviceInfo) {
+	output, err := json.MarshalIndent(device, "", "  ")
 	if err != nil {
-		fmt.Println("Error reading network interfaces:", err)
+		fmt.Println("Error marshaling to JSON:", err)
 		return
 	}
-
-	for _, f := range files {
-		id := f.Name()
-		status := readFirstLine(filepath.Join(basePath, id, "operstate"))
-		if status == "" {
-			status = "unknown"
-		}
-		printDevice("network", id, id, status)
-	}
+	fmt.Println(string(output))
 }
+
 func listUSBDevices() {
 	basePath := "/sys/bus/usb/devices"
 	files, err := os.ReadDir(basePath)
@@ -55,9 +51,9 @@ func listUSBDevices() {
 		id := f.Name()
 		path := filepath.Join(basePath, id)
 
-		// Ensure it's a real USB device by checking if idVendor/idProduct exist
 		vid := readFirstLine(filepath.Join(path, "idVendor"))
 		pid := readFirstLine(filepath.Join(path, "idProduct"))
+		serial := readFirstLine(filepath.Join(path, "serial"))
 
 		if vid == "" || pid == "" {
 			continue
@@ -76,8 +72,17 @@ func listUSBDevices() {
 			status = "not connected"
 		}
 
-		name := fmt.Sprintf("%s (VID: %s, PID: %s)", product, vid, pid)
-		printDevice("usb", id, name, status)
+		device := DeviceInfo{
+			DeviceType:   "usb",
+			ID:           id,
+			Name:         product,
+			Status:       status,
+			Enumerator:   "usb",
+			VendorID:     vid,
+			ProductID:    pid,
+			SerialNumber: serial,
+		}
+		printDeviceAsJSON(device)
 	}
 }
 
@@ -93,8 +98,25 @@ func listPCIDevices() {
 		path := filepath.Join(basePath, id)
 		vendor := readFirstLine(filepath.Join(path, "vendor"))
 		device := readFirstLine(filepath.Join(path, "device"))
+		serial := readFirstLine(filepath.Join(path, "serial"))
+
+		if serial == "" {
+			serial = "N/A"
+		}
+
 		name := fmt.Sprintf("Vendor: %s, Device: %s", vendor, device)
-		printDevice("pci", id, name, "connected")
+
+		deviceInfo := DeviceInfo{
+			DeviceType:   "pci",
+			ID:           id,
+			Name:         name,
+			Status:       "connected",
+			Enumerator:   "pci",
+			VendorID:     vendor,
+			ProductID:    device,
+			SerialNumber: serial,
+		}
+		printDeviceAsJSON(deviceInfo)
 	}
 }
 
@@ -107,11 +129,65 @@ func listStorageDevices() {
 
 	for _, f := range files {
 		id := f.Name()
-		model := readFirstLine(filepath.Join(basePath, id, "device/model"))
+		devicePath := filepath.Join(basePath, id)
+
+		model := readFirstLine(filepath.Join(devicePath, "device/model"))
 		if model == "" {
-			model = "N/A"
+			model = "Unknown Storage Device"
 		}
-		printDevice("storage", id, model, "available")
+
+		serial := readFirstLine(filepath.Join(devicePath, "device/serial"))
+		if serial == "" {
+			serial = "N/A"
+		}
+
+		deviceInfo := DeviceInfo{
+			DeviceType:   "storage",
+			ID:           id,
+			Name:         model,
+			Status:       "available",
+			Enumerator:   "storage",
+			VendorID:     "N/A",
+			ProductID:    "N/A",
+			SerialNumber: serial,
+		}
+		printDeviceAsJSON(deviceInfo)
+	}
+}
+
+func listNetworkInterfaces() {
+	basePath := "/sys/class/net"
+	files, err := os.ReadDir(basePath)
+	if err != nil {
+		fmt.Println("Error reading network interfaces:", err)
+		return
+	}
+
+	for _, f := range files {
+		id := f.Name()
+		interfacePath := filepath.Join(basePath, id)
+		status := readFirstLine(filepath.Join(interfacePath, "operstate"))
+		if status == "" {
+			status = "unknown"
+		}
+
+		wirelessPath := filepath.Join(interfacePath, "wireless")
+		deviceType := "network"
+		if _, err := os.Stat(wirelessPath); err == nil {
+			deviceType = "wifi"
+		}
+
+		deviceInfo := DeviceInfo{
+			DeviceType:   deviceType,
+			ID:           id,
+			Name:         id,
+			Status:       status,
+			Enumerator:   "network",
+			VendorID:     "N/A",
+			ProductID:    "N/A",
+			SerialNumber: "N/A",
+		}
+		printDeviceAsJSON(deviceInfo)
 	}
 }
 
@@ -125,68 +201,21 @@ func listWebcams() {
 	for _, f := range files {
 		id := f.Name()
 		name := readFirstLine(filepath.Join(basePath, id, "name"))
-		printDevice("webcam", id, name, "connected")
-	}
-}
-
-func listInputDevices() {
-	basePath := "/sys/class/input"
-	files, err := os.ReadDir(basePath)
-	if err != nil {
-		return
-	}
-
-	for _, f := range files {
-		id := f.Name()
-		name := readFirstLine(filepath.Join(basePath, id, "name"))
-		printDevice("input", id, name, "available")
-	}
-}
-
-func listTTYDevices() {
-	basePath := "/sys/class/tty"
-	files, err := os.ReadDir(basePath)
-	if err != nil {
-		return
-	}
-
-	for _, f := range files {
-		id := f.Name()
-		name := readFirstLine(filepath.Join(basePath, id, "device"))
-		printDevice("tty", id, name, "available")
-	}
-}
-
-func listSoundDevices() {
-	basePath := "/sys/class/sound"
-	files, err := os.ReadDir(basePath)
-	if err != nil {
-		return
-	}
-
-	for _, f := range files {
-		id := f.Name()
-		name := readFirstLine(filepath.Join(basePath, id, "id"))
-		printDevice("sound", id, name, "available")
-	}
-}
-
-func listBluetoothDevices() {
-	basePath := "/sys/class/bluetooth"
-	files, err := os.ReadDir(basePath)
-	if err != nil {
-		return
-	}
-
-	for _, f := range files {
-		id := f.Name()
-		devicePath := filepath.Join(basePath, id)
-		deviceName := readFirstLine(filepath.Join(devicePath, "name"))
-		deviceAddr := readFirstLine(filepath.Join(devicePath, "address"))
-		if deviceName == "" {
-			deviceName = "Unknown Bluetooth Device"
+		if name == "" {
+			name = "Unknown Webcam"
 		}
-		printDevice("bluetooth", deviceAddr, deviceName, "available")
+
+		deviceInfo := DeviceInfo{
+			DeviceType:   "webcam",
+			ID:           id,
+			Name:         name,
+			Status:       "connected",
+			Enumerator:   "webcam",
+			VendorID:     "N/A",
+			ProductID:    "N/A",
+			SerialNumber: "N/A",
+		}
+		printDeviceAsJSON(deviceInfo)
 	}
 }
 
@@ -196,10 +225,6 @@ func listAllDevices() {
 	listPCIDevices()
 	listStorageDevices()
 	listWebcams()
-	listInputDevices()
-	// listTTYDevices()
-	listSoundDevices()
-	listBluetoothDevices()
 }
 
 func enumerateForLinux() {
@@ -209,8 +234,6 @@ func enumerateForLinux() {
 	}
 	listAllDevices()
 }
-
-
 func enumerateForMAC() {
 }
 

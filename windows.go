@@ -1,6 +1,10 @@
+//go:build windows
+// +build windows
+
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,21 +15,23 @@ import (
 )
 
 type DeviceInfo struct {
-	Name       string
-	DeviceID   string
-	Status     string
-	DeviceType string
-	VendorID   string
-	ProductID  string
+	Name         string
+	DeviceID     string
+	Serial string
+	Status       string
+	DeviceType   string
+	VID     string
+	PID    string
+	EnumID   string
 }
 
 type SPDevInfoData struct {
-	CbSize     uint32
-	DevInst    uint32
+	CbSize        uint32
+	DevInst       uint32
 	ParentDevInst uint32
-	ClassGuid  windows.GUID
-	DevEnumerator uint16
-	Reserved   uint32
+	ClassGuid     windows.GUID
+	DevEnumID uint16
+	Reserved      uint32
 }
 
 func ListAllDevices() ([]DeviceInfo, error) {
@@ -52,6 +58,7 @@ func ListAllDevices() ([]DeviceInfo, error) {
 		devices = append(devices, DeviceInfo{
 			Name:       d.Name,
 			DeviceID:   d.DeviceID,
+			EnumID: 	extractEnumID(d.DeviceID),
 			Status:     d.Status,
 			DeviceType: deviceType,
 		})
@@ -68,15 +75,30 @@ func extractVIDPID(deviceID string) (string, string, error) {
 	return matches[1], matches[2], nil
 }
 
+func extractSerialFromDeviceID(deviceID string) string {
+	parts := strings.Split(deviceID, "\\")
+	if len(parts) >= 3 {
+		return parts[2]
+	}
+	return ""
+}
+
+func extractEnumID(deviceID string) string {
+	parts := strings.Split(deviceID, "\\")
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return "Unknown"
+}
+
 func getParentDeviceID(deviceID string) (string, error) {
 	setupAPI := windows.NewLazySystemDLL("setupapi.dll")
 	setupDiGetClassDevs := setupAPI.NewProc("SetupDiGetClassDevsW")
 	setupDiEnumDeviceInfo := setupAPI.NewProc("SetupDiEnumDeviceInfo")
 	setupDiGetDeviceInstanceId := setupAPI.NewProc("SetupDiGetDeviceInstanceIdW")
-	// setupDiGetDeviceProperty := setupAPI.NewProc("SetupDiGetDevicePropertyW")
 
 	var devInfoSet windows.Handle
-	ret, _, _ := setupDiGetClassDevs.Call(0, 0, 0, 2) // 2 = DIGCF_ALLCLASSES | DIGCF_PRESENT
+	ret, _, _ := setupDiGetClassDevs.Call(0, 0, 0, 2) 
 	if ret == 0 {
 		return "", fmt.Errorf("failed to get device information set")
 	}
@@ -122,32 +144,35 @@ func enumerateForWindows() {
 		return
 	}
 
-	// Enumerate and display device details
-	for _, d := range devices {
-		fmt.Printf("Name       : %s\n", d.Name)
-		fmt.Printf("DeviceID   : %s\n", d.DeviceID)
-		fmt.Printf("Status     : %s\n", d.Status)
-		fmt.Printf("DeviceType : %s\n", d.DeviceType)
+	for i, d := range devices {
+		vid, pid, err := extractVIDPID(d.DeviceID)
+		if err == nil {
+			devices[i].VID = vid
+			devices[i].PID = pid
+		}
+
+		serial := extractSerialFromDeviceID(d.DeviceID)
+		if serial != "" {
+			devices[i].Serial = serial
+		}
+
+		devices[i].EnumID = extractEnumID(d.DeviceID)
 
 		if strings.HasPrefix(d.DeviceID, "USBSTOR") {
-			vid, pid, err := extractVIDPID(d.DeviceID)
-			if err != nil {
-				fmt.Println("Error extracting VID/PID:", err)
-			} else {
-				fmt.Printf("VendorID   : %s\n", vid)
-				fmt.Printf("ProductID  : %s\n", pid)
-			}
-
-			fmt.Println(d.DeviceID)
 			parentDeviceID, err := getParentDeviceID(d.DeviceID)
-			if err != nil {
-				fmt.Println("Error getting parent device ID:", err)
-			} else {
-				fmt.Println("Parent Device VID/PID:", parentDeviceID)
+			if err == nil {
+				devices[i].DeviceID += " (Parent: " + parentDeviceID + ")"
 			}
 		}
-		fmt.Println("-----------------------------------")
 	}
+
+	output, err := json.MarshalIndent(devices, "", "  ")
+	if err != nil {
+		fmt.Println("Error marshaling to JSON:", err)
+		return
+	}
+
+	fmt.Println(string(output))
 }
 
 func enumerateForMAC() {
