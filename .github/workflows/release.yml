@@ -12,7 +12,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        
 
     steps:
       - uses: actions/checkout@v4
@@ -24,16 +23,25 @@ jobs:
 
       - name: Build the binary for ${{ matrix.os }}
         run: |
+          echo "Listing files before build:"
+          ls -al
+          
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            go build -o enumerator.exe
+            GOOS=windows GOARCH=amd64 go build -o enumerator.exe
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            go build -o enumerator
+            GOOS=darwin GOARCH=amd64 go build -o enumerator
           else
-            go build -o enumerator
+            GOOS=linux GOARCH=amd64 go build -o enumerator
           fi
+
+          echo "Listing files after build:"
+          ls -al
 
       - name: Move the binary files
         run: |
+          echo "Listing files before moving:"
+          ls -al
+          
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             mv enumerator.exe enumerator-windows.exe
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
@@ -42,19 +50,22 @@ jobs:
             mv enumerator enumerator-linux
           fi
 
+          echo "Listing files after moving:"
+          ls -al
+
       - name: Archive the binaries
         run: |
           mkdir release
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv enumerator-windows.exe release/
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv enumerator-darwin release/
-          else
-            mv enumerator-linux release/            
-          fi
-
+          mv enumerator-linux release/
+          mv enumerator-windows.exe release/
+          mv enumerator-darwin release/
           cd release
           zip -r release-binaries.zip *
+
+      - name: Debug GitHub Ref and Release Check
+        run: |
+          echo "GitHub Ref: $GITHUB_REF"
+          echo "Is this a tag? ${{ startsWith(github.ref, 'refs/tags/') }}"
 
       - name: Upload release to GitHub
         if: startsWith(github.ref, 'refs/tags/')
