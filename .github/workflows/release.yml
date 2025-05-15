@@ -12,8 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        arch: [amd64]  # 64-bit (amd64) only for macOS
-        # For Windows and Linux, you can still include both 32-bit (386) and 64-bit (amd64)
+        goarch: [amd64, 386]  # Build for both 64-bit (amd64) and 32-bit (386)
 
     steps:
       - uses: actions/checkout@v4
@@ -23,33 +22,39 @@ jobs:
         with:
           go-version: '1.24.3'
 
-      - name: Build the binary for ${{ matrix.os }} and ${{ matrix.arch }}
+      - name: Build the binary for ${{ matrix.os }} and ${{ matrix.goarch }}
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            GOOS=windows GOARCH=${{ matrix.arch }} go build -o enumerator-${{ matrix.arch }}.exe
+            GOOS=windows GOARCH=${{ matrix.goarch }} go build -o enumerator-${{ matrix.goarch }}.exe
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            GOOS=darwin GOARCH=${{ matrix.arch }} go build -o enumerator-${{ matrix.arch }}
+            GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o enumerator-${{ matrix.goarch }}
           else
-            GOOS=linux GOARCH=${{ matrix.arch }} go build -o enumerator-${{ matrix.arch }}
+            GOOS=linux GOARCH=${{ matrix.goarch }} go build -o enumerator-${{ matrix.goarch }}
           fi
 
-      - name: Archive the binary
+      - name: Move the binary files
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv enumerator-${{ matrix.arch }}.exe enumerator-${{ matrix.os }}-${{ matrix.arch }}.exe
+            mv enumerator-${{ matrix.goarch }}.exe enumerator-windows-${{ matrix.goarch }}.exe
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv enumerator-${{ matrix.arch }} enumerator-${{ matrix.os }}-${{ matrix.arch }}
+            mv enumerator-${{ matrix.goarch }} enumerator-darwin-${{ matrix.goarch }}
           else
-            mv enumerator-${{ matrix.arch }} enumerator-${{ matrix.os }}-${{ matrix.arch }}
+            mv enumerator-${{ matrix.goarch }} enumerator-linux-${{ matrix.goarch }}
           fi
+
+      - name: Archive the binaries
+        run: |
+          mkdir release
+          mv enumerator-linux-* release/
+          mv enumerator-windows-* release/
+          mv enumerator-darwin-* release/
+          cd release
+          zip -r release-binaries.zip *
 
       - name: Upload release to GitHub
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            enumerator-linux-amd64
-            enumerator-windows-amd64.exe
-            enumerator-darwin-amd64
+          files: release/release-binaries.zip
         env:
           GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
