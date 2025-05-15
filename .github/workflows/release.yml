@@ -1,0 +1,30 @@
+name: Release with Source Archive
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release directory and archive
+        run: |
+          mkdir release-src
+          cp -r src README.md go.mod go.sum release-src/
+          zip -r source.zip release-src
+          tar -czf source.tar.gz release-src
+
+      - name: Upload release to GitHub
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            source.zip
+            source.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
