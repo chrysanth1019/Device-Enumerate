@@ -25,6 +25,7 @@ type DeviceInfo struct {
 	EnumID   string
 }
 
+
 type SPDevInfoData struct {
 	CbSize        uint32
 	DevInst       uint32
