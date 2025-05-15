@@ -12,7 +12,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        arch: [amd64, 386]
+        arch: [amd64]  # 64-bit (amd64) only for macOS
+        # For Windows and Linux, you can still include both 32-bit (386) and 64-bit (amd64)
 
     steps:
       - uses: actions/checkout@v4
@@ -48,10 +49,7 @@ jobs:
         with:
           files: |
             enumerator-linux-amd64
-            enumerator-linux-386
             enumerator-windows-amd64.exe
-            enumerator-windows-386.exe
             enumerator-darwin-amd64
-            enumerator-darwin-386
         env:
           GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
