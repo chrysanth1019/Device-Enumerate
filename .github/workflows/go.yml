@@ -22,7 +22,13 @@ jobs:
           go-version: '1.24.3'
 
       - name: Build
-        run: go build -o enumerator
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            go build -o enumerator.exe
+          else
+            go build -o enumerator
+          fi
+        shell: bash
 
       - name: Test
         run: |
