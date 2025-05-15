@@ -1,4 +1,4 @@
-name: Release with Binaries (32-bit and 64-bit)
+name: Release with Binaries
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir release
           mv enumerator-linux release/
-          mv enumerator-windows release/
+          mv enumerator-windows.exe release/
           mv enumerator-darwin release/
           cd release
           zip -r release-binaries.zip *
