@@ -6,9 +6,9 @@ on:
       - 'v*'
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -21,58 +21,45 @@ jobs:
         with:
           go-version: '1.24.3'
 
-      - name: Build the binary for ${{ matrix.os }}
+      - name: Build binary
         run: |
-          echo "Listing files before build:"
-          ls -al
-          
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            GOOS=windows GOARCH=amd64 go build -o enumerator.exe
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            GOOS=darwin GOARCH=amd64 go build -o enumerator
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            GOOS=windows GOARCH=amd64 go build -o enumerator-windows.exe
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            GOOS=darwin GOARCH=amd64 go build -o enumerator-darwin
           else
-            GOOS=linux GOARCH=amd64 go build -o enumerator
+            GOOS=linux GOARCH=amd64 go build -o enumerator-linux
           fi
 
-          echo "Listing files after build:"
-          ls -al
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-binary
+          path: |
+            enumerator-*
 
-      - name: Move the binary files
-        run: |
-          echo "Listing files before moving:"
-          ls -al
-          
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv enumerator.exe enumerator-windows.exe
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv enumerator enumerator-darwin
-          else
-            mv enumerator enumerator-linux
-          fi
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
 
-          echo "Listing files after moving:"
-          ls -al
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-      - name: Archive the binaries
+      - name: List downloaded files
+        run: ls -R artifacts
+
+      - name: Zip all binaries
         run: |
           mkdir release
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv enumerator-windows.exe release/
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv enumerator-darwin release/
-          else
-            mv enumerator-linux release/
-          fi
+          find artifacts -type f -exec cp {} release/ \;
           cd release
           zip -r release-binaries.zip *
 
-      - name: Debug GitHub Ref and Release Check
-        run: |
-          echo "GitHub Ref: $GITHUB_REF"
-          echo "Is this a tag? ${{ startsWith(github.ref, 'refs/tags/') }}"
-
       - name: Upload release to GitHub
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: release/release-binaries.zip
