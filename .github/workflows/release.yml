@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        goarch: [amd64, 386]  # Build for both 64-bit (amd64) and 32-bit (386)
+        
 
     steps:
       - uses: actions/checkout@v4
@@ -22,32 +22,32 @@ jobs:
         with:
           go-version: '1.24.3'
 
-      - name: Build the binary for ${{ matrix.os }} and ${{ matrix.goarch }}
+      - name: Build the binary for ${{ matrix.os }}
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            GOOS=windows GOARCH=${{ matrix.goarch }} go build -o enumerator-${{ matrix.goarch }}.exe
+            go build -o enumerator.exe
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o enumerator-${{ matrix.goarch }}
+            go build -o enumerator
           else
-            GOOS=linux GOARCH=${{ matrix.goarch }} go build -o enumerator-${{ matrix.goarch }}
+            go build -o enumerator
           fi
 
       - name: Move the binary files
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv enumerator-${{ matrix.goarch }}.exe enumerator-windows-${{ matrix.goarch }}.exe
+            mv enumerator.exe enumerator-windows.exe
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv enumerator-${{ matrix.goarch }} enumerator-darwin-${{ matrix.goarch }}
+            mv enumerator enumerator-darwin
           else
-            mv enumerator-${{ matrix.goarch }} enumerator-linux-${{ matrix.goarch }}
+            mv enumerator enumerator-linux
           fi
 
       - name: Archive the binaries
         run: |
           mkdir release
-          mv enumerator-linux-* release/
-          mv enumerator-windows-* release/
-          mv enumerator-darwin-* release/
+          mv enumerator-linux release/
+          mv enumerator-windows release/
+          mv enumerator-darwin release/
           cd release
           zip -r release-binaries.zip *
 
