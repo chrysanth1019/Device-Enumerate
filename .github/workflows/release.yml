@@ -1,4 +1,4 @@
-name: Release with Source Archive
+name: Release with Binaries (32-bit and 64-bit)
 
 on:
   push:
@@ -9,20 +9,49 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [amd64, 386]
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Archive entire source
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.3'
+
+      - name: Build the binary for ${{ matrix.os }} and ${{ matrix.arch }}
         run: |
-          git archive --format=zip -o source.zip HEAD
-          git archive --format=tar.gz -o source.tar.gz HEAD
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            GOOS=windows GOARCH=${{ matrix.arch }} go build -o enumerator-${{ matrix.arch }}.exe
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            GOOS=darwin GOARCH=${{ matrix.arch }} go build -o enumerator-${{ matrix.arch }}
+          else
+            GOOS=linux GOARCH=${{ matrix.arch }} go build -o enumerator-${{ matrix.arch }}
+          fi
+
+      - name: Archive the binary
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            mv enumerator-${{ matrix.arch }}.exe enumerator-${{ matrix.os }}-${{ matrix.arch }}.exe
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            mv enumerator-${{ matrix.arch }} enumerator-${{ matrix.os }}-${{ matrix.arch }}
+          else
+            mv enumerator-${{ matrix.arch }} enumerator-${{ matrix.os }}-${{ matrix.arch }}
+          fi
 
       - name: Upload release to GitHub
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            source.zip
-            source.tar.gz
+            enumerator-linux-amd64
+            enumerator-linux-386
+            enumerator-windows-amd64.exe
+            enumerator-windows-386.exe
+            enumerator-darwin-amd64
+            enumerator-darwin-386
         env:
           GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
