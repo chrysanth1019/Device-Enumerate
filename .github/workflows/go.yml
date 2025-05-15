@@ -1,7 +1,4 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
-name: Go
+name: Go Multi-OS Build
 
 on:
   push:
@@ -10,19 +7,28 @@ on:
     branches: [ "main" ]
 
 jobs:
-
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.24.3'
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.3'
 
-    - name: Build
-      run: go build -o enumerator
+      - name: Build
+        run: go build -o enumerator
 
-    - name: Test
-      run: ./enumerator
+      - name: Test
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            ./enumerator.exe
+          else
+            ./enumerator
+          fi
+        shell: bash
