@@ -45,9 +45,14 @@ jobs:
       - name: Archive the binaries
         run: |
           mkdir release
-          mv enumerator-linux release/
-          mv enumerator-windows.exe release/
-          mv enumerator-darwin release/
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            mv enumerator-windows.exe release/
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            mv enumerator-darwin release/
+          else
+            mv enumerator-linux release/            
+          fi
+
           cd release
           zip -r release-binaries.zip *
 
