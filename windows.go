@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"unsafe"
@@ -138,7 +139,30 @@ func getParentDeviceID(deviceID string) (string, error) {
 	return "", fmt.Errorf("parent device ID not found")
 }
 
+func extractUSBStorVidPid(deviceID string) (vid, pid string) {
+	re := regexp.MustCompile(`VEN_([^&]+)&PROD_([^&\\]+)`)
+	matches := re.FindStringSubmatch(deviceID)
+	if len(matches) == 3 {
+		vid = matches[1]
+		pid = strings.ReplaceAll(matches[2], "_", " ")
+	}
+	return
+}
+
+func printDevices(devices interface{}) {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", " ") // Same indentation as json.MarshalIndent
+	if err := encoder.Encode(devices); err != nil {
+		fmt.Println("Error encoding JSON:", err)
+	}
+}
+
 func enumerateForWindows() {
+
+	// vid, pid := extractUSBStorVidPid("USBSTOR\\\\CDROM\\u0026VEN_DL&PROD_SENTRY_EMS\\u0026REV_PMAP\\\\001E0BB89D96B110B000FEF0\\u00261")
+	// fmt.Printf("VID: %s, PID: %s\n", vid, pid)
+	
 	devices, err := ListAllDevices()
 	if err != nil || len(devices) == 0 {
 		fmt.Println("No devices found or error:", err)
@@ -160,20 +184,21 @@ func enumerateForWindows() {
 		devices[i].EnumID = extractEnumID(d.DeviceID)
 
 		if strings.HasPrefix(d.DeviceID, "USBSTOR") {
-			parentDeviceID, err := getParentDeviceID(d.DeviceID)
-			if err == nil {
-				devices[i].DeviceID += " (Parent: " + parentDeviceID + ")"
-			}
+			_vid, _pid := extractUSBStorVidPid(d.DeviceID)
+			devices[i].VID = _vid
+			devices[i].PID = _pid
 		}
 	}
 
-	output, err := json.MarshalIndent(devices, "", "  ")
-	if err != nil {
-		fmt.Println("Error marshaling to JSON:", err)
-		return
-	}
+	printDevices(devices)
 
-	fmt.Println(string(output))
+	// output, err := json.MarshalIndent(devices, "", "  ")
+	// if err != nil {
+	// 	fmt.Println("Error marshaling to JSON:", err)
+	// 	return
+	// }
+
+	// fmt.Println(string(output))
 }
 
 func enumerateForMAC() {
