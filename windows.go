@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
+	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"unsafe"
 
 	"github.com/StackExchange/wmi"
@@ -16,53 +18,121 @@ import (
 )
 
 type DeviceInfo struct {
-	Name         string
-	DeviceID     string
-	Serial string
-	Status       string
-	DeviceType   string
-	VID     string
-	PID    string
-	EnumID   string
+	Name          string
+	DeviceID      string
+	Serial        string
+	Status        string
+	DeviceType    string
+	VID           string
+	PID           string
+	EnumID        string
+	Parent        string
+	ParentVID     string
+	ParentPID     string
+	SSID          []string
+}
+
+type WLANInterface struct {
+    Name        string   
+    Description string   
+    SSIDs       []string 
 }
 
 
-type SPDevInfoData struct {
-	CbSize        uint32
-	DevInst       uint32
-	ParentDevInst uint32
-	ClassGuid     windows.GUID
-	DevEnumID uint16
-	Reserved      uint32
+const (
+	MAX_DEVICE_ID_LEN = 200
+	DIGCF_PRESENT     = 0x00000002
+	DIGCF_ALLCLASSES  = 0x00000004
+)
+
+var (
+	setupapi           = syscall.NewLazyDLL("setupapi.dll")
+	cfgmgr32           = syscall.NewLazyDLL("cfgmgr32.dll")
+
+	procSetupDiGetClassDevs         = setupapi.NewProc("SetupDiGetClassDevsW")
+	procSetupDiEnumDeviceInfo       = setupapi.NewProc("SetupDiEnumDeviceInfo")
+	procSetupDiGetDeviceInstanceId  = setupapi.NewProc("SetupDiGetDeviceInstanceIdW")
+
+	procCMGetParent   = cfgmgr32.NewProc("CM_Get_Parent")
+	procCMGetDeviceID = cfgmgr32.NewProc("CM_Get_Device_IDW")
+)
+
+type SP_DEVINFO_DATA struct {
+	cbSize    uint32
+	ClassGuid windows.GUID
+	DevInst   uint32
+	Reserved  uintptr
 }
 
 func ListAllDevices() ([]DeviceInfo, error) {
-	var dst []struct {
+	var dstPnP []struct {
 		Name     string
 		DeviceID string
 		Status   string
 		PNPClass string
 	}
-	err := wmi.Query("SELECT Name, DeviceID, Status, PNPClass FROM Win32_PnPEntity", &dst)
+
+	var dstDisk []struct {
+		Model         string
+		DeviceID      string
+		InterfaceType string
+		MediaType     string
+	}
+
+	err := wmi.Query("SELECT Name, DeviceID, Status, PNPClass FROM Win32_PnPEntity", &dstPnP)
+	if err != nil {
+		return nil, err
+	}
+
+	err = wmi.Query("SELECT Model, DeviceID, InterfaceType, MediaType FROM Win32_DiskDrive", &dstDisk)
 	if err != nil {
 		return nil, err
 	}
 
 	var devices []DeviceInfo
-	for _, d := range dst {
-		deviceType := d.PNPClass
-
-		if strings.Contains(strings.ToUpper(d.Name), "SSD") ||
-			strings.Contains(strings.ToUpper(d.DeviceID), "NVME") {
+	for _, d := range dstDisk {		
+		deviceType := "DiskDrive"
+		if strings.Contains(strings.ToUpper(d.Model), "SSD") || strings.Contains(strings.ToUpper(d.DeviceID), "NVME") {
 			deviceType = "SSD"
 		}
+		devices = append(devices, DeviceInfo{
+			Name:          d.Model,
+			DeviceID:      d.DeviceID,
+			EnumID: 	   d.InterfaceType,
+			DeviceType:    deviceType,
+			Status: 	   "Connected",
+			Serial: 		extractSerialFromDeviceID(d.DeviceID),
+			SSID: 			[]string{},
+		})
+	}
 
+	ssid_interfaces, ssid_err := GetWLANInterfaces()
+
+	for _, d := range dstPnP {
+		var ssids = []string{}
+		
+		deviceType := d.PNPClass
+		if strings.Contains(strings.ToUpper(d.Name), "SSD") || strings.Contains(strings.ToUpper(d.DeviceID), "NVME") {
+			deviceType = "SSD"
+		}
+		
+		if ssid_err == nil {
+			for _, s := range ssid_interfaces {
+				if s.Description == d.Name {
+					ssids = s.SSIDs
+					break
+				}
+			}
+		}
+		
 		devices = append(devices, DeviceInfo{
 			Name:       d.Name,
 			DeviceID:   d.DeviceID,
-			EnumID: 	extractEnumID(d.DeviceID),
+			EnumID:     extractEnumID(d.DeviceID),
 			Status:     d.Status,
 			DeviceType: deviceType,
+			Serial: 	extractSerialFromDeviceID(d.DeviceID),
+			SSID: 		ssids,
 		})
 	}
 	return devices, nil
@@ -93,76 +163,84 @@ func extractEnumID(deviceID string) string {
 	return "Unknown"
 }
 
-func getParentDeviceID(deviceID string) (string, error) {
-	setupAPI := windows.NewLazySystemDLL("setupapi.dll")
-	setupDiGetClassDevs := setupAPI.NewProc("SetupDiGetClassDevsW")
-	setupDiEnumDeviceInfo := setupAPI.NewProc("SetupDiEnumDeviceInfo")
-	setupDiGetDeviceInstanceId := setupAPI.NewProc("SetupDiGetDeviceInstanceIdW")
-
-	var devInfoSet windows.Handle
-	ret, _, _ := setupDiGetClassDevs.Call(0, 0, 0, 2) 
-	if ret == 0 {
-		return "", fmt.Errorf("failed to get device information set")
+func ExtractParentVIDPID(deviceID string) (string, string, error) {
+	venDevRegex := regexp.MustCompile(`VEN_([0-9A-Fa-f]{4})&DEV_([0-9A-Fa-f]{4})`)
+	matches := venDevRegex.FindStringSubmatch(deviceID)
+	if len(matches) == 3 {
+		return matches[1], matches[2], nil
 	}
-	devInfoSet = windows.Handle(ret)
-	defer windows.CloseHandle(devInfoSet)
+	return "", "", fmt.Errorf("no VEN and DEV IDs found")
+}
 
-	var devIndex uint32
+func GetParentDeviceID(targetID string) string {
+	pattern := ".*"
+	guidStr := "{21EC2020-3AEA-1069-A2DD-08002B30309D}"
+	guid, err := windows.GUIDFromString(guidStr)
+	if err != nil {
+		return ""
+	}
+
+	handle, _, _ := procSetupDiGetClassDevs.Call(
+		uintptr(unsafe.Pointer(&guid)), 0, 0, DIGCF_PRESENT|DIGCF_ALLCLASSES,
+	)
+	if handle == 0 {
+		return ""
+	}
+	defer syscall.CloseHandle(syscall.Handle(handle))
+
+	var i uint32
 	for {
-		var deviceInfoData SPDevInfoData
-		deviceInfoData.CbSize = uint32(unsafe.Sizeof(deviceInfoData))
-
-		ret, _, _ := setupDiEnumDeviceInfo.Call(uintptr(devInfoSet), uintptr(devIndex), uintptr(unsafe.Pointer(&deviceInfoData)))
+		devInfo := SP_DEVINFO_DATA{cbSize: uint32(unsafe.Sizeof(SP_DEVINFO_DATA{}))}
+		ret, _, _ := procSetupDiEnumDeviceInfo.Call(handle, uintptr(i), uintptr(unsafe.Pointer(&devInfo)))
 		if ret == 0 {
 			break
 		}
 
-		var instanceID [256]uint16
-		ret, _, _ = setupDiGetDeviceInstanceId.Call(uintptr(devInfoSet), uintptr(unsafe.Pointer(&deviceInfoData)), uintptr(unsafe.Pointer(&instanceID[0])), uintptr(len(instanceID)), 0)
-		if ret == 0 {
-			continue
-		}
+		var buf [MAX_DEVICE_ID_LEN]uint16
+		procSetupDiGetDeviceInstanceId.Call(
+			handle,
+			uintptr(unsafe.Pointer(&devInfo)),
+			uintptr(unsafe.Pointer(&buf[0])),
+			MAX_DEVICE_ID_LEN,
+			0,
+		)
 
-		instanceIDStr := windows.UTF16ToString(instanceID[:])
+		deviceID := syscall.UTF16ToString(buf[:])
+		if strings.EqualFold(deviceID, targetID) {
+			current := devInfo.DevInst
+			var parentBuf [MAX_DEVICE_ID_LEN]uint16
 
-		if strings.Contains(instanceIDStr, deviceID) {
-			vid, pid, err := extractVIDPID(instanceIDStr)
-			if err != nil {
-				return "", err
+			for {
+				var parentInst uint32
+				r1, _, _ := procCMGetParent.Call(uintptr(unsafe.Pointer(&parentInst)), uintptr(current), 0)
+				if r1 != 0 {
+					break
+				}
+
+				r2, _, _ := procCMGetDeviceID.Call(
+					uintptr(parentInst),
+					uintptr(unsafe.Pointer(&parentBuf[0])),
+					MAX_DEVICE_ID_LEN,
+					0,
+				)
+				if r2 != 0 {
+					break
+				}
+
+				parentID := syscall.UTF16ToString(parentBuf[:])
+				match, _ := regexp.MatchString(pattern, parentID)
+				if match {
+					return parentID
+				}
+				current = parentInst
 			}
-			return fmt.Sprintf("VID_%s&PID_%s", vid, pid), nil
 		}
-
-		devIndex++
+		i++
 	}
-
-	return "", fmt.Errorf("parent device ID not found")
-}
-
-func extractUSBStorVidPid(deviceID string) (vid, pid string) {
-	re := regexp.MustCompile(`VEN_([^&]+)&PROD_([^&\\]+)`)
-	matches := re.FindStringSubmatch(deviceID)
-	if len(matches) == 3 {
-		vid = matches[1]
-		pid = strings.ReplaceAll(matches[2], "_", " ")
-	}
-	return
-}
-
-func printDevices(devices interface{}) {
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", " ") // Same indentation as json.MarshalIndent
-	if err := encoder.Encode(devices); err != nil {
-		fmt.Println("Error encoding JSON:", err)
-	}
+	return ""
 }
 
 func enumerateForWindows() {
-
-	// vid, pid := extractUSBStorVidPid("USBSTOR\\\\CDROM\\u0026VEN_DL&PROD_SENTRY_EMS\\u0026REV_PMAP\\\\001E0BB89D96B110B000FEF0\\u00261")
-	// fmt.Printf("VID: %s, PID: %s\n", vid, pid)
-	
 	devices, err := ListAllDevices()
 	if err != nil || len(devices) == 0 {
 		fmt.Println("No devices found or error:", err)
@@ -175,30 +253,109 @@ func enumerateForWindows() {
 			devices[i].VID = vid
 			devices[i].PID = pid
 		}
-
-		serial := extractSerialFromDeviceID(d.DeviceID)
-		if serial != "" {
-			devices[i].Serial = serial
-		}
-
-		devices[i].EnumID = extractEnumID(d.DeviceID)
-
-		if strings.HasPrefix(d.DeviceID, "USBSTOR") {
-			_vid, _pid := extractUSBStorVidPid(d.DeviceID)
-			devices[i].VID = _vid
-			devices[i].PID = _pid
+		devices[i].Parent = GetParentDeviceID(d.DeviceID)
+		devices[i].ParentVID, devices[i].ParentPID, _ = extractVIDPID(devices[i].Parent)
+		if devices[i].ParentVID == "" && devices[i].ParentPID == "" {
+			devices[i].ParentVID, devices[i].ParentPID, _ = ExtractParentVIDPID(devices[i].Parent)
 		}
 	}
-
 	printDevices(devices)
+}
 
-	// output, err := json.MarshalIndent(devices, "", "  ")
-	// if err != nil {
-	// 	fmt.Println("Error marshaling to JSON:", err)
-	// 	return
-	// }
+func printDevices(devices interface{}) {
+	var b strings.Builder
 
-	// fmt.Println(string(output))
+	encoder := json.NewEncoder(&b)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(devices); err != nil {
+		fmt.Println("JSON encode error:", err)
+		return
+	}
+
+	result := strings.ReplaceAll(b.String(), `\\`, `\`)
+	fmt.Println(result)
+}
+
+func GetWLANInterfaces() ([]WLANInterface, error) {
+    cmd := exec.Command("netsh", "wlan", "show", "interfaces")
+    var out bytes.Buffer
+    cmd.Stdout = &out
+
+    if err := cmd.Run(); err != nil {
+        return nil, fmt.Errorf("failed to execute netsh: %w", err)
+    }
+
+    output := out.String()
+    lines := strings.Split(output, "\n")
+
+    var interfaces []WLANInterface
+    var current WLANInterface
+
+    for _, line := range lines {
+        trimmed := strings.TrimSpace(line)
+
+        if strings.HasPrefix(trimmed, "Name") {
+            if current.Name != "" {
+                interfaces = append(interfaces, current)
+                current = WLANInterface{}
+            }
+            current.Name = extractValueWithDot(trimmed)
+        } else if strings.HasPrefix(trimmed, "Description") {
+            current.Description = extractValueWithDot(trimmed)
+        }
+    }
+
+    if current.Name != "" {
+        interfaces = append(interfaces, current)
+    }
+
+    for i, iface := range interfaces {
+        ssids, err := getSSIDsForInterface(iface.Name)
+        if err != nil {
+            return nil, fmt.Errorf("failed to get SSIDs for %s: %w", iface.Name, err)
+        }
+        interfaces[i].SSIDs = ssids
+    }
+
+    return interfaces, nil
+}
+
+func getSSIDsForInterface(interfaceName string) ([]string, error) {
+    cmd := exec.Command("netsh", "wlan", "show", "networks", "interface="+interfaceName)
+    var out bytes.Buffer
+    cmd.Stdout = &out
+
+    if err := cmd.Run(); err != nil {
+        return nil, err
+    }
+
+    output := out.String()
+    lines := strings.Split(output, "\n")
+    var ssids []string
+
+    for _, line := range lines {
+        trimmed := strings.TrimSpace(line)
+        if strings.HasPrefix(trimmed, "SSID ") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                ssid := strings.TrimSpace(parts[1])
+                if ssid != "" && ssid != "0" {
+                    ssids = append(ssids, ssid)
+                }
+            }
+        }
+    }
+
+    return ssids, nil
+}
+
+func extractValueWithDot(line string) string {
+    parts := strings.SplitN(line, ":", 2)
+    if len(parts) == 2 {
+        return strings.TrimSpace(parts[1])
+    }
+    return ""
 }
 
 func enumerateForMAC() {
