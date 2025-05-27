@@ -17,6 +17,23 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type BSSIDInfo struct {
+	BSSID string
+	Signal string
+	RadioType string
+	Channel	string
+	BasicRates_Mbps string
+	OtherRates_Mbps string
+}
+
+type SSIDInfo struct {
+	SSID 			string
+	NetworkType 	string
+	Authentication 	string
+	Encryption 		string
+	BSSID		[]BSSIDInfo
+}
+
 type DeviceInfo struct {
 	Name          string
 	DeviceID      string
@@ -29,13 +46,13 @@ type DeviceInfo struct {
 	Parent        string
 	ParentVID     string
 	ParentPID     string
-	SSID          []string
+	SSID          []SSIDInfo
 }
 
 type WLANInterface struct {
     Name        string   
     Description string   
-    SSIDs       []string 
+    SSIDs       []SSIDInfo 
 }
 
 
@@ -102,14 +119,14 @@ func ListAllDevices() ([]DeviceInfo, error) {
 			DeviceType:    deviceType,
 			Status: 	   "Connected",
 			Serial: 		extractSerialFromDeviceID(d.DeviceID),
-			SSID: 			[]string{},
+			SSID: 			[]SSIDInfo{},
 		})
 	}
 
 	ssid_interfaces, ssid_err := GetWLANInterfaces()
 
 	for _, d := range dstPnP {
-		var ssids = []string{}
+		var ssids = []SSIDInfo{}
 		
 		deviceType := d.PNPClass
 		if strings.Contains(strings.ToUpper(d.Name), "SSD") || strings.Contains(strings.ToUpper(d.DeviceID), "NVME") {
@@ -253,6 +270,11 @@ func enumerateForWindows() {
 			devices[i].VID = vid
 			devices[i].PID = pid
 		}
+		
+		if devices[i].VID == "" && devices[i].PID == "" {
+			devices[i].VID, devices[i].PID, _ = ExtractParentVIDPID(d.DeviceID)
+		}
+
 		devices[i].Parent = GetParentDeviceID(d.DeviceID)
 		devices[i].ParentVID, devices[i].ParentPID, _ = extractVIDPID(devices[i].Parent)
 		if devices[i].ParentVID == "" && devices[i].ParentPID == "" {
@@ -321,8 +343,8 @@ func GetWLANInterfaces() ([]WLANInterface, error) {
     return interfaces, nil
 }
 
-func getSSIDsForInterface(interfaceName string) ([]string, error) {
-    cmd := exec.Command("netsh", "wlan", "show", "networks", "interface="+interfaceName)
+func getSSIDsForInterface(interfaceName string) ([]SSIDInfo, error) {
+    cmd := exec.Command("netsh", "wlan", "show", "networks", "mode=bssid", "interface="+interfaceName)
     var out bytes.Buffer
     cmd.Stdout = &out
 
@@ -332,16 +354,120 @@ func getSSIDsForInterface(interfaceName string) ([]string, error) {
 
     output := out.String()
     lines := strings.Split(output, "\n")
-    var ssids []string
-
+    var ssids []SSIDInfo
+	
     for _, line := range lines {
-        trimmed := strings.TrimSpace(line)
-        if strings.HasPrefix(trimmed, "SSID ") {
+		trimmed := strings.TrimSpace(line)
+        if strings.HasPrefix(trimmed, "SSID") {
+			parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+				ssid := strings.TrimSpace(parts[1])
+                if ssid != "" && ssid != "0" {
+					var current SSIDInfo
+					current.SSID = ssid
+					ssids = append(ssids, current)
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Network type") {
             parts := strings.SplitN(trimmed, ":", 2)
             if len(parts) == 2 {
-                ssid := strings.TrimSpace(parts[1])
-                if ssid != "" && ssid != "0" {
-                    ssids = append(ssids, ssid)
+                network_type := strings.TrimSpace(parts[1])
+                if network_type != "" && network_type != "0" {
+					if len(ssids) > 0 {
+						ssids[len(ssids) - 1].NetworkType = network_type
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Authentication") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                auth := strings.TrimSpace(parts[1])
+                if auth != "" && auth != "0" {
+					if len(ssids) > 0 {
+						ssids[len(ssids) - 1].Authentication = auth
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Encryption") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                enc := strings.TrimSpace(parts[1])
+                if enc != "" && enc != "0" {
+					if len(ssids) > 0 {
+						ssids[len(ssids) - 1].Encryption = enc
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "BSSID") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                bssid := strings.TrimSpace(parts[1])
+                if bssid != "" && bssid != "0" {
+					if len(ssids) > 0 {
+						var v BSSIDInfo
+						v.BSSID = bssid
+						ssids[len(ssids) - 1].BSSID = append(ssids[len(ssids)-1].BSSID, v)
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Signal") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                sig := strings.TrimSpace(parts[1])
+                if sig != "" && sig != "0" {
+					if len(ssids) > 0 {
+						if len(ssids[len(ssids)-1].BSSID) > 0 {
+							ssids[len(ssids)-1].BSSID[len(ssids[len(ssids)-1].BSSID) - 1].Signal = sig
+						}
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Radio type") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                radio := strings.TrimSpace(parts[1])
+                if radio != "" && radio != "0" {
+					if len(ssids) > 0 {
+						if len(ssids[len(ssids)-1].BSSID) > 0 {
+							ssids[len(ssids)-1].BSSID[len(ssids[len(ssids)-1].BSSID) - 1].RadioType = radio
+						}
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Channel") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                chnn := strings.TrimSpace(parts[1])
+                if chnn != "" && chnn != "0" {
+					if len(ssids) > 0 {
+						if len(ssids[len(ssids)-1].BSSID) > 0 {
+							ssids[len(ssids)-1].BSSID[len(ssids[len(ssids)-1].BSSID) - 1].Channel = chnn
+						}
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Basic rates") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                brates := strings.TrimSpace(parts[1])
+                if brates != "" && brates != "0" {
+					if len(ssids) > 0 {
+						if len(ssids[len(ssids)-1].BSSID) > 0 {
+							ssids[len(ssids)-1].BSSID[len(ssids[len(ssids)-1].BSSID) - 1].BasicRates_Mbps = brates
+						}
+					}
+                }
+            }
+        } else if strings.HasPrefix(trimmed, "Other rates") {
+            parts := strings.SplitN(trimmed, ":", 2)
+            if len(parts) == 2 {
+                orates := strings.TrimSpace(parts[1])
+                if orates != "" && orates != "0" {
+					if len(ssids) > 0 {
+						if len(ssids[len(ssids)-1].BSSID) > 0 {
+							ssids[len(ssids)-1].BSSID[len(ssids[len(ssids)-1].BSSID) - 1].OtherRates_Mbps = orates
+						}
+					}
                 }
             }
         }
